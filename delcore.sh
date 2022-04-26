@@ -1,38 +1,57 @@
 #!/bin/bash
+scriptname="$(basename $0)"
+prompt=" > "
+
 _usage() {
-    echo "usage:delcore.sh Rename coredump file name to core.[process]."
-    echo "      Deal with directory: user home, bin and fbin every 10 min by default."
-    echo "      Use \"delcore.sh [INTERVAL]\" to change sleeping interval."
-    echo "      Use \"delcore.sh [DIRECTORY]\" to deal with expected directory once."
-    echo "      Use \"delcore.sh [-h/-help]\" to show the usage."
-    echo
+    echo ""
+    echo "${scriptname}"
+    echo "      Rename coredump file to core.[process]_[arg1]_[arg2]...[argn] and keep only the latest, periodically(per 10 min by default)."
+    echo "      Default directories: user home, bin and fbin ."
+    echo "usage"
+    echo "      ${scriptname} [interval] - to process every [interval] mins."
+    echo "      ${scriptname} [directory] - to process specified directory and exit."
+    echo "      ${scriptname} [-h/-help] - to show this message."
+    echo ""
 }
+
 _mvcore() {
-    if [ -d $1 ]; then
-        cd $1
-        echo "Dealing with directory: $(pwd)."
+    if [[ -d "$1" ]]; then
+        cd "$1"
+        echo "Renaming coredump files in \"${PWD}\"..."
+        count=$(ls core* 2>/dev/null | wc -l)
+        if [[ ${count} -eq 0 ]]; then
+            echo "${prompt}Great! No coredump file found\(^o^)/"
+            echo 
+            return 0
+        else
+            echo "${prompt}${count} coredump file(s) found."
+        fi
         for corefile in $(ls -tr core*); do
-            extname=$(file -Pelf_phnum=10000 $corefile | awk 'BEGIN{FS="from '\''|'\''"}{gsub("  *","_",$2);split($2,tmp,"/");print tmp[length(tmp)]}')
-            echo mv -f $corefile core.$extname.
-            mv -f $corefile core.$extname
+            ext="$(file -Pelf_phnum=10000 "${corefile}" | awk 'BEGIN{FS="from '\''|'\''"}{gsub("  *","_",$2);split($2,tmp,"/");print tmp[length(tmp)]}')"
+            newname="core.${ext}"
+            if [[ "${corefile}" == "${newname}" ]]; then
+                echo "${prompt}Skipping \"${corefile}\""
+            else
+                echo "${prompt}Renaming \"${corefile}\"${prompt}\"${newname}\""
+                cmd="mv -f \"${corefile}\" \"${newname}\""
+                eval "${cmd}" 2>/dev/null
+            fi
         done
+        echo ""
     else
         echo "$1: No such directory."
         _usage
-        exit 0
+        return 1
     fi
 }
-if [ $1 ]; then
-    if [ ! $(echo $1 | sed 's/[0-9]//g') ]; then
-        if [ -d "$1" ]; then
-            until [ "$input" = "1" -o "$input" = "2" ]; do
+if [[ $1 ]]; then
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+        if [[ -d "$1" ]]; then
+            until [[ "${input}" =~ ^[12]$ ]]; do
                 echo "What do you mean by \""$1"\"?"
-                echo "1.Deal with \""$(
-                    cd $1
-                    pwd
-                )"\", or"
-                echo "2.Make me sleep every" $1 "minutes."
-                read input
+                echo " 1: Rename coredump files in \""$(readlink -f $1)"\", or"
+                echo " 2: Sleep for every" $1 "minutes."
+                read -n1 input
             done
             case $input in
             1)
@@ -44,7 +63,7 @@ if [ $1 ]; then
         else
             interval=$1
         fi
-    elif [ $1 = "-h" -o $1 = "-help" ]; then
+    elif [[ "$1" =~ ^(-h|--help)$ ]]; then
         _usage
         exit 0
     else
@@ -54,22 +73,18 @@ if [ $1 ]; then
 else
     interval=10
 fi
-if [ $(uname) = "Linux" ]; then
-    procnum=2
-else
-    procnum=1
-fi
-if [ $(ps -ef | grep delcore.sh | grep -v grep | wc -l) -gt "$procnum" ]; then
-    echo "delcore.sh is running already =)"
+
+pid="$(ps -ef | \grep ${scriptname} | \grep -v grep | \grep -v $$ | awk '{print $2}')"
+if [[ ! -z "${pid}" ]]; then
+    echo "${scriptname}(${pid}) is running already =)"
     exit 0
 fi
-_usage
-while [ 1 ]; do
+
+while true; do
     _mvcore ${HOME}
     _mvcore ${HOME}/bin
     _mvcore ${HOME}/fes_bin
-    echo
-    echo Sleeping for $interval min...
+    echo "Sleeping for $interval min(s)..."
     sleep $(expr $interval \* 60)
-    echo
+    echo ""
 done
